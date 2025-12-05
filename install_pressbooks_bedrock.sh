@@ -283,15 +283,18 @@ if [ ! -f "$HTACCESS_FILE" ]; then
 # BEGIN WordPress (Pressbooks / Bedrock)
 <IfModule mod_rewrite.c>
 RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 RewriteBase /
 RewriteRule ^index\.php$ - [L]
 
-# Add a trailing slash to /wp-admin
-RewriteRule ^wp-admin$ wp-admin/ [R=301,L]
+# add a trailing slash to /wp-admin
+RewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]
 
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) wp/$2 [L]
+RewriteRule ^([_0-9a-zA-Z-]+/)?(.*\.php)$ wp/$2 [L]
 RewriteRule . index.php [L]
 </IfModule>
 # END WordPress
@@ -466,6 +469,28 @@ else
   echo "  [+] Activating redis-cache plugin network-wide..."
   wp_cli plugin activate redis-cache --network
 fi
+
+# 7) Google reCAPTCHA (Advanced Google reCAPTCHA plugin)
+echo "[*] Installing Google reCAPTCHA plugin (Advanced Google reCAPTCHA)..."
+
+if wp_cli plugin is-installed advanced-google-recaptcha >/dev/null 2>&1; then
+  echo "  [-] advanced-google-recaptcha plugin already installed."
+else
+  echo "  [+] Installing advanced-google-recaptcha plugin..."
+  wp_cli plugin install advanced-google-recaptcha
+fi
+
+if wp_cli plugin is-active advanced-google-recaptcha --network >/dev/null 2>&1; then
+  echo "  [-] advanced-google-recaptcha already network-active."
+else
+  echo "  [+] Activating advanced-google-recaptcha network-wide..."
+  wp_cli plugin activate advanced-google-recaptcha --network || \
+    echo "  [!] Could not network-activate advanced-google-recaptcha (non-fatal)."
+fi
+
+echo "  [!] NOTE: To fully enable Google reCAPTCHA, go to:"
+echo "      Network Admin → Settings → Advanced Google reCAPTCHA"
+echo "      and paste your Site Key and Secret Key."
 
 ### --- SUMMARY --- ###
 echo "====================================================================="
