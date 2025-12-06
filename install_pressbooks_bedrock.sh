@@ -469,6 +469,26 @@ echo "  [!] NOTE: To fully enable Google reCAPTCHA, go to:"
 echo "      Network Admin → Settings → Advanced Google reCAPTCHA"
 echo "      and paste your Site Key and Secret Key."
 
+# 8) SMTP mail plugin (WP Mail SMTP by WPForms)
+echo "[*] Ensuring WP Mail SMTP plugin is installed..."
+
+if wp_cli plugin is-installed wp-mail-smtp >/dev/null 2>&1; then
+  echo "  [-] wp-mail-smtp plugin already installed."
+else
+  echo "  [+] Installing wp-mail-smtp plugin..."
+  wp_cli plugin install wp-mail-smtp
+fi
+
+if wp_cli plugin is-active wp-mail-smtp --network >/dev/null 2>&1; then
+  echo "  [-] wp-mail-smtp plugin already network-active."
+else
+  echo "  [+] Activating wp-mail-smtp plugin network-wide..."
+  wp_cli plugin activate wp-mail-smtp --network || \
+    echo "  [!] Could not network-activate wp-mail-smtp (non-fatal)."
+fi
+
+echo "  [!] Configure SMTP under: Network Admin → WP Mail SMTP → Settings"
+
 ### --- SUMMARY --- ###
 echo "====================================================================="
 echo " Pressbooks Bedrock installation / update COMPLETE"
