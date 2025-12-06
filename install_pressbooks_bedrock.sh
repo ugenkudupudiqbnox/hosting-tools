@@ -133,6 +133,16 @@ fi
 # Ensure web user owns the app (for composer, wp, dotenv)
 chown -R www-data:www-data "$APP_DIR"
 
+echo "[*] Ensuring composer cache directory for www-data..."
+COMPOSER_CACHE_ROOT="/var/www/.cache/composer"
+mkdir -p "$COMPOSER_CACHE_ROOT"
+chown -R www-data:www-data "/var/www/.cache"
+
+echo "[*] Ensuring composer config & cache directories for www-data..."
+mkdir -p /var/www/.config/composer
+mkdir -p /var/www/.cache/composer
+chown -R www-data:www-data /var/www/.config /var/www/.cache
+
 cd "$APP_DIR"
 
 export COMPOSER_ALLOW_SUPERUSER=1
