@@ -545,3 +545,4 @@ echo
 echo "  App directory:  ${APP_DIR}"
 echo "  Log file:       ${LOGFILE}"
 echo "====================================================================="
+
