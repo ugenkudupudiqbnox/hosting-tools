@@ -2,6 +2,10 @@
 # install_pressbooks_bedrock.sh
 # Idempotent Pressbooks + Bedrock + Apache + Let's Encrypt on Ubuntu 24.04
 # Domain: pressbooks.qbnox.com
+#
+# Usage:
+#   sudo ./install_pressbooks_bedrock.sh              # no GitHub token (may hit rate limits)
+#   sudo ./install_pressbooks_bedrock.sh ghp_xxx      # with GitHub token for Composer
 
 set -euo pipefail
 
@@ -21,6 +25,9 @@ WP_ADMIN_EMAIL="admin@${DOMAIN}"
 
 APP_DIR="/var/www/pressbooksoss-bedrock"
 PRINCE_DEB_URL="https://www.princexml.com/download/prince_16.1-1_ubuntu24.04_amd64.deb"
+
+# Optional GitHub token (command-line argument)
+GITHUB_TOKEN="${1:-}"
 
 ### --- FLAGS TO REPORT WHAT HAPPENED --- ###
 NEW_DB_CREATED=false
@@ -142,6 +149,16 @@ echo "[*] Ensuring composer config & cache directories for www-data..."
 mkdir -p /var/www/.config/composer
 mkdir -p /var/www/.cache/composer
 chown -R www-data:www-data /var/www/.config /var/www/.cache
+
+# If a GitHub token was provided as CLI argument, configure it for composer
+if [ -n "$GITHUB_TOKEN" ]; then
+  echo "[*] Configuring Composer GitHub token for www-data..."
+  sudo -u www-data COMPOSER_ALLOW_SUPERUSER=1 \
+    composer config -g github-oauth.github.com "$GITHUB_TOKEN"
+  echo "  [-] GitHub token stored in /var/www/.config/composer/auth.json"
+else
+  echo "[!] No GitHub token argument provided; Composer may hit GitHub rate limits."
+fi
 
 cd "$APP_DIR"
 
@@ -528,4 +545,3 @@ echo
 echo "  App directory:  ${APP_DIR}"
 echo "  Log file:       ${LOGFILE}"
 echo "====================================================================="
-
