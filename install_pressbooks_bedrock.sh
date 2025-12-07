@@ -4,8 +4,9 @@
 # Domain: pressbooks.qbnox.com
 #
 # Usage:
-#   sudo ./install_pressbooks_bedrock.sh              # no GitHub token (may hit rate limits)
-#   sudo ./install_pressbooks_bedrock.sh ghp_xxx      # with GitHub token for Composer
+#   sudo ./install_pressbooks_bedrock.sh                    # no GitHub token (may hit rate limits)
+#   sudo ./install_pressbooks_bedrock.sh ghp_xxx            # with GitHub token, default CPU/RAM
+#   sudo ./install_pressbooks_bedrock.sh ghp_xxx 2 6        # with token + explicit CPU/RAM
 
 set -euo pipefail
 
@@ -26,8 +27,19 @@ WP_ADMIN_EMAIL="admin@${DOMAIN}"
 APP_DIR="/var/www/pressbooksoss-bedrock"
 PRINCE_DEB_URL="https://www.princexml.com/download/prince_16.1-1_ubuntu24.04_amd64.deb"
 
-# Optional GitHub token (command-line argument)
+# CLI / env configuration
+# Arg1: GitHub token (optional)
+# Arg2: CPU cores (optional, overrides env CPU_CORES)
+# Arg3: RAM in GB (optional, overrides env RAM_GB)
+
 GITHUB_TOKEN="${1:-}"
+CLI_CPU_CORES="${2:-}"
+CLI_RAM_GB="${3:-}"
+
+CPU_CORES="${CLI_CPU_CORES:-${CPU_CORES:-2}}"
+RAM_GB="${CLI_RAM_GB:-${RAM_GB:-6}}"
+
+echo "[*] Detected tuning parameters: CPU_CORES=${CPU_CORES}, RAM_GB=${RAM_GB}"
 
 ### --- FLAGS TO REPORT WHAT HAPPENED --- ###
 NEW_DB_CREATED=false
@@ -72,10 +84,33 @@ PHP_VERSION="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
 PHP_FPM_INI="/etc/php/${PHP_VERSION}/fpm/php.ini"
 PHP_CLI_INI="/etc/php/${PHP_VERSION}/cli/php.ini"
 
+# Decide PHP memory_limit based on RAM (idempotent)
+get_php_memory_limit() {
+  local ram_gb="$1"
+  # Simple heuristic:
+  #  <=2GB  -> 256M
+  #  <=4GB  -> 384M
+  #  <=8GB  -> 512M
+  #  >8GB   -> 1024M
+  if [ "$ram_gb" -le 2 ]; then
+    echo "256M"
+  elif [ "$ram_gb" -le 4 ]; then
+    echo "384M"
+  elif [ "$ram_gb" -le 8 ]; then
+    echo "512M"
+  else
+    echo "1024M"
+  fi
+}
+
 tune_php_ini() {
   local INI="$1"
+  local MEM_LIMIT
+  MEM_LIMIT="$(get_php_memory_limit "$RAM_GB")"
+
   if [ -f "$INI" ]; then
-    sed -i "s/^memory_limit = .*/memory_limit = 512M/" "$INI"
+    echo "  [*] Setting PHP memory_limit=${MEM_LIMIT} in ${INI}"
+    sed -i "s/^memory_limit = .*/memory_limit = ${MEM_LIMIT}/" "$INI"
     sed -i "s/^upload_max_filesize = .*/upload_max_filesize = 256M/" "$INI"
     sed -i "s/^post_max_size = .*/post_max_size = 256M/" "$INI"
     sed -i "s/^max_execution_time = .*/max_execution_time = 600/" "$INI"
@@ -86,6 +121,37 @@ tune_php_ini() {
 
 tune_php_ini "$PHP_FPM_INI"
 tune_php_ini "$PHP_CLI_INI"
+
+### --- PHP-FPM POOL TUNING (www pool) --- ###
+echo "[*] Tuning PHP-FPM pool based on CPU_CORES=${CPU_CORES}, RAM_GB=${RAM_GB}..."
+
+PHP_FPM_POOL_CONF="/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf"
+
+if [ -f "$PHP_FPM_POOL_CONF" ]; then
+  # Assume ~64MB per PHP process effective (code + overhead).
+  # max_children = (RAM_GB * 1024 / 64), but cap between 10 and 80.
+  MAX_CHILDREN=$(( RAM_GB * 1024 / 64 ))
+  if [ "$MAX_CHILDREN" -lt 10 ]; then
+    MAX_CHILDREN=10
+  elif [ "$MAX_CHILDREN" -gt 80 ]; then
+    MAX_CHILDREN=80
+  fi
+
+  # Start/spare servers based loosely on CPU cores
+  START_SERVERS=$(( CPU_CORES * 2 ))
+  MIN_SPARE_SERVERS=$CPU_CORES
+  MAX_SPARE_SERVERS=$(( CPU_CORES * 4 ))
+
+  echo "  [*] PHP-FPM www.conf: pm=dynamic, max_children=${MAX_CHILDREN}, start=${START_SERVERS}, min_spare=${MIN_SPARE_SERVERS}, max_spare=${MAX_SPARE_SERVERS}"
+
+  sed -i "s/^pm = .*/pm = dynamic/" "$PHP_FPM_POOL_CONF"
+  sed -i "s/^pm.max_children = .*/pm.max_children = ${MAX_CHILDREN}/" "$PHP_FPM_POOL_CONF"
+  sed -i "s/^pm.start_servers = .*/pm.start_servers = ${START_SERVERS}/" "$PHP_FPM_POOL_CONF"
+  sed -i "s/^pm.min_spare_servers = .*/pm.min_spare_servers = ${MIN_SPARE_SERVERS}/" "$PHP_FPM_POOL_CONF"
+  sed -i "s/^pm.max_spare_servers = .*/pm.max_spare_servers = ${MAX_SPARE_SERVERS}/" "$PHP_FPM_POOL_CONF"
+else
+  echo "  [!] PHP-FPM pool config not found: ${PHP_FPM_POOL_CONF}"
+fi
 
 systemctl restart "php${PHP_VERSION}-fpm"
 
@@ -337,20 +403,27 @@ fi
 echo "[*] Applying basic sysctl and ulimit tuning (idempotent files)..."
 
 SYSCTL_FILE="/etc/sysctl.d/99-pressbooks-tuning.conf"
+
+# Scale a bit with CPU cores
+SOMAXCONN=$((256 * CPU_CORES))
+FILE_MAX=$((100000 * CPU_CORES))
+
 cat >"$SYSCTL_FILE" <<EOF
-net.core.somaxconn = 1024
+net.core.somaxconn = ${SOMAXCONN}
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.ip_local_port_range = 1024 65000
-fs.file-max = 200000
+fs.file-max = ${FILE_MAX}
 vm.swappiness = 10
 EOF
 
 sysctl --system
 
 LIMITS_FILE="/etc/security/limits.d/99-pressbooks.conf"
+NOFILE_VAL=$((50000 * CPU_CORES))
+
 cat >"$LIMITS_FILE" <<EOF
-www-data soft nofile 100000
-www-data hard nofile 100000
+www-data soft nofile ${NOFILE_VAL}
+www-data hard nofile ${NOFILE_VAL}
 EOF
 
 ### --- LET'S ENCRYPT (CERTBOT) --- ###
@@ -545,4 +618,3 @@ echo
 echo "  App directory:  ${APP_DIR}"
 echo "  Log file:       ${LOGFILE}"
 echo "====================================================================="
-
