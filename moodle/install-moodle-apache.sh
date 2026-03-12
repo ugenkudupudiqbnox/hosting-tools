@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# install_full_moodle_with_moove_and_cleanup.sh
-# Full idempotent Moodle installer for Ubuntu 24.04 LTS with auto-sizing, Moove theme install,
+# install-moodle-apache.sh
+# Full idempotent Moodle 5.1.1 installer for Ubuntu 22.04 LTS with auto-sizing, Moove theme install,
 # and optional git metadata cleanup (idempotent).
 # Edit variables in the top section before running. Run as root.
 set -euo pipefail
@@ -36,7 +36,7 @@ UPLOAD_MAX_MB=${UPLOAD_MAX_MB:-512}
 
 # Moove theme settings
 INSTALL_MOOVE="${INSTALL_MOOVE:-yes}"               # set to "no" to skip automatic moove installation
-MOODLE_BRANCH="${MOODLE_BRANCH:-MOODLE_401_STABLE}" # choose the branch/tag matching your Moodle version
+MOODLE_BRANCH="${MOODLE_BRANCH:-MOODLE_501_STABLE}" # choose the branch/tag matching Moodle 5.1.1
 MOOVE_REPO="${MOOVE_REPO:-https://github.com/willianmano/moodle-theme_moove.git}"
 
 # Safety flags for shared systems (if needed)
@@ -244,7 +244,7 @@ if [ ! -d "${MOODLE_DIR}" ] || [ -z "$(ls -A "${MOODLE_DIR}" 2>/dev/null || true
   mkdir -p "${MOODLE_DIR}"
   chown -R "${WWW_USER}:${WWW_GROUP}" "${MOODLE_DIR}"
   cd /tmp
-  if ! git clone --depth 1 -b MOODLE_401_STABLE https://github.com/moodle/moodle.git moodle-tmp 2>/dev/null; then
+  if ! git clone --depth 1 -b MOODLE_501_STABLE https://github.com/moodle/moodle.git moodle-tmp 2>/dev/null; then
     git clone --depth 1 https://github.com/moodle/moodle.git moodle-tmp
   fi
   rsync -a moodle-tmp/ "${MOODLE_DIR}/"
@@ -290,7 +290,7 @@ APACHEV
 else
   if ! grep -q "^\\s*ServerName" "${APACHE_VHOST}"; then
     sed -i "0,/<VirtualHost/{s#<VirtualHost#<VirtualHost\n    ServerName $(echo "${MOODLE_WWWROOT}" | sed -E 's#^https?://##' | sed -E 's#/.*$##')#" "${APACHE_VHOST}" || true
-    systemctl.reload apache2 || true || true
+    systemctl reload apache2 || true
   fi
 fi
 
@@ -509,19 +509,38 @@ else
 fi
 
 # -----------------------
+# Harden generated config.php for HTTPS installs
+# -----------------------
+if [ -f "${MOODLE_DIR}/config.php" ] && [[ "${MOODLE_WWWROOT}" == https://* ]]; then
+  if ! grep -q "^\$CFG->cookiesecure = true;" "${MOODLE_DIR}/config.php"; then
+    python3 - <<PY
+from pathlib import Path
+path = Path("${MOODLE_DIR}/config.php")
+text = path.read_text()
+needle = "require_once(__DIR__ . '/lib/setup.php');"
+insert = "\$CFG->cookiesecure = true;\\n\\n" + needle
+if needle in text and "\$CFG->cookiesecure = true;" not in text:
+    path.write_text(text.replace(needle, insert, 1))
+PY
+  fi
+  chown "${WWW_USER}:${WWW_GROUP}" "${MOODLE_DIR}/config.php" || true
+  chmod 640 "${MOODLE_DIR}/config.php" || true
+fi
+
+# -----------------------
 # systemd timer for Moodle cron
 # -----------------------
 if [ ! -f /etc/systemd/system/moodle-cron.service ]; then
-  cat >/etc/systemd/system/moodle-cron.service <<'SERVICE'
+  cat >/etc/systemd/system/moodle-cron.service <<SERVICE
 [Unit]
 Description=Moodle cron job
 After=network.target
 
 [Service]
 Type=oneshot
-User=www-data
-Group=www-data
-ExecStart=/usr/bin/php /var/www/moodle/admin/cli/cron.php
+User=${WWW_USER}
+Group=${WWW_GROUP}
+ExecStart=/usr/bin/php ${MOODLE_DIR}/admin/cli/cron.php
 SERVICE
 
   cat >/etc/systemd/system/moodle-cron.timer <<'TIMER'

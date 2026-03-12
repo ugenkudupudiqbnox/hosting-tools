@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# install_pressbooks_bedrock.sh
+# install-pressbooks-bedrock-apache.sh
 # Idempotent Pressbooks + Bedrock + Apache + Let's Encrypt on Ubuntu 24.04
 # Domain: pressbooks.qbnox.com
 #
 # Usage:
-#   sudo ./install_pressbooks_bedrock.sh                    # no GitHub token (may hit rate limits)
-#   sudo ./install_pressbooks_bedrock.sh ghp_xxx            # with GitHub token, default CPU/RAM
-#   sudo ./install_pressbooks_bedrock.sh ghp_xxx 2 6        # with token + explicit CPU/RAM
+#   sudo ./install-pressbooks-bedrock-apache.sh                    # no GitHub token (may hit rate limits)
+#   sudo ./install-pressbooks-bedrock-apache.sh ghp_xxx            # with GitHub token, default CPU/RAM
+#   sudo ./install-pressbooks-bedrock-apache.sh ghp_xxx 2 6        # with token + explicit CPU/RAM
 
 set -euo pipefail
 

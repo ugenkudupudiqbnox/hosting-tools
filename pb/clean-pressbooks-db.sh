@@ -1,8 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+info() {
+    echo "[INFO] $1"
+}
+
 MYSQL_ROOT_USER='root'
 MYSQL_ROOT_PWD='4hyaKaeFUXPhw/oOwsY9aMEM'
 DB_NAME='pressbook'
 DB_USER='wpuser'
 DB_USER_PWD='4hyaKaeFUXPhw/oOwsY9aMEM'
+
+TMP_MY_CNF="/root/.my.cnf.clean_install"
+cat > "$TMP_MY_CNF" <<EOF
+[client]
+user=$MYSQL_ROOT_USER
+password=$MYSQL_ROOT_PWD
+EOF
+chmod 600 "$TMP_MY_CNF"
 
 # 1) Full backup of all databases
 BACKUP_PATH="/root/all-databases-backup-$(date +%F_%s).sql"

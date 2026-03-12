@@ -2,7 +2,7 @@
 ################################################################################
 # Moodle 5.1.1 Automated Installation Script
 #
-# Usage: sudo ./install-moodle.sh [FQDN]
+# Usage: sudo ./install-moodle-nginx.sh [FQDN]
 #   FQDN: Fully qualified domain name (e.g., learn.example.com)
 #         If not provided, uses 'localhost' and skips SSL setup
 #
@@ -259,7 +259,7 @@ upload_max_filesize = 512M
 post_max_size = 512M
 max_input_vars = 5000
 
-# Execution Timeout Settings (30 minutes for large file uploads)
+# Execution Timeout Settings - 30 minutes for large file uploads
 max_execution_time = 1800
 max_input_time = 1800
 default_socket_timeout = 1800
@@ -283,7 +283,7 @@ opcache.save_comments = 1
 opcache.enable_cli = 0
 EOF
 
-# Optimize PHP-FPM pool (auto-tuned for ${CPU_CORES} cores)
+# Optimize PHP-FPM pool auto-tuned for ${CPU_CORES} cores
 cat > /etc/php/8.3/fpm/pool.d/zzz-moodle-optimized.conf << EOF
 [www]
 pm = dynamic
@@ -295,7 +295,6 @@ pm.max_requests = 500
 pm.process_idle_timeout = 10s
 request_terminate_timeout = 1800
 
-# Per-pool PHP settings
 php_admin_value[memory_limit] = 256M
 php_admin_value[max_execution_time] = 300
 php_admin_flag[display_errors] = off
@@ -368,12 +367,12 @@ cd /var/www
 git clone --branch MOODLE_501_STABLE --depth 1 https://github.com/moodle/moodle.git
 cd moodle
 
-# Install Composer dependencies
-sudo -u www-data composer install --no-dev --classmap-authoritative
-
 # Set ownership and permissions
 chown -R www-data:www-data "$MOODLE_DIR"
 chmod -R 755 "$MOODLE_DIR"
+
+# Install Composer dependencies
+sudo -u www-data composer install --no-dev --classmap-authoritative
 
 # Create Moodle data directory
 mkdir -p "$MOODLE_DATA"
@@ -414,6 +413,7 @@ global \$CFG;
 \$CFG->dataroot  = '${MOODLE_DATA}';
 \$CFG->admin     = 'admin';
 \$CFG->directorypermissions = 0770;
+$( [[ "$USE_SSL" == "true" ]] && printf "%s\n" "// HTTPS cookie hardening" "\$CFG->cookiesecure = true;" )
 
 // Redis Session Handler
 \$CFG->session_handler_class = '\core\session\redis';
@@ -505,6 +505,12 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
 
+    # Security headers
+    server_tokens off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     # File upload size limit
     client_max_body_size 512M;
 
@@ -514,11 +520,17 @@ server {
 
     # Moodle rewrite rules
     location / {
-        try_files \$uri \$uri/ =404;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        try_files \$uri \$uri/ /index.php?\$query_string;
     }
 
     # PHP-FPM configuration
     location ~ [^/]\.php(/|$) {
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         fastcgi_index index.php;
@@ -537,15 +549,28 @@ server {
         fastcgi_cache_valid 200 60m;
     }
 
+    # Moodle plugin files
+    location ~* ^/pluginfile.php/ {
+        try_files \$uri /pluginfile.php?\$query_string;
+    }
+
     # Deny access to sensitive files
     location ~ (/\.ht|\.git|\.env|composer\.(json|lock)) {
         deny all;
         return 404;
     }
 
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
     # Static file caching
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
         expires 30d;
+        access_log off;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Cache-Control "public, immutable";
     }
 }
@@ -556,6 +581,8 @@ else
 server {
     listen 80;
     server_name ${FQDN};
+
+    server_tokens off;
 
     root ${MOODLE_DIR}/public;
     index index.php index.html index.htm;
@@ -569,11 +596,15 @@ server {
 
     # Moodle rewrite rules
     location / {
-        try_files \$uri \$uri/ =404;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        try_files \$uri \$uri/ /index.php?\$query_string;
     }
 
     # PHP-FPM configuration
     location ~ [^/]\.php(/|$) {
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         fastcgi_index index.php;
@@ -592,15 +623,27 @@ server {
         fastcgi_cache_valid 200 60m;
     }
 
+    # Moodle plugin files
+    location ~* ^/pluginfile.php/ {
+        try_files \$uri /pluginfile.php?\$query_string;
+    }
+
     # Deny access to sensitive files
     location ~ (/\.ht|\.git|\.env|composer\.(json|lock)) {
         deny all;
         return 404;
     }
 
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
     # Static file caching
     location ~* \.(jpg|jpeg|png|gif|ico|css|js|svg|woff|woff2|ttf|eot)$ {
         expires 30d;
+        access_log off;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Cache-Control "public, immutable";
     }
 }
@@ -656,16 +699,35 @@ systemctl enable redis-server
 log_success "Redis installation complete"
 
 ################################################################################
-# 9. AUTOMATED BACKUPS
+# 9. MOODLE CRON
 ################################################################################
-log_info "Step 9: Setting up automated backups"
+log_info "Step 9: Configuring Moodle cron"
+
+cat > /etc/cron.d/moodle << EOF
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+* * * * * www-data /usr/bin/php ${MOODLE_DIR}/admin/cli/cron.php >/dev/null 2>&1
+EOF
+
+chmod 644 /etc/cron.d/moodle
+
+log_success "Moodle cron configured"
+
+################################################################################
+# 10. AUTOMATED BACKUPS
+################################################################################
+log_info "Step 10: Setting up automated backups"
 
 mkdir -p "${BACKUP_DIR}"/{database,full}
-chown -R www-data:www-data "${BACKUP_DIR}"
+chown -R root:root "${BACKUP_DIR}"
+find "${BACKUP_DIR}" -type d -exec chmod 750 {} +
 
 # Database backup script
 cat > /usr/local/bin/moodle-db-backup.sh << EOF
 #!/bin/bash
+umask 077
+
 DB_NAME="${DB_NAME}"
 DB_USER="${DB_USER}"
 DB_PASS="${DB_PASS}"
@@ -691,6 +753,8 @@ EOF
 # Full backup script
 cat > /usr/local/bin/moodle-full-backup.sh << EOF
 #!/bin/bash
+umask 077
+
 BACKUP_DIR="${BACKUP_DIR}/full"
 MOODLE_ROOT="${MOODLE_DIR}"
 MOODLE_DATA="${MOODLE_DATA}"
@@ -704,7 +768,10 @@ mkdir -p "\$BACKUP_PATH"
 
 echo "\$(date): Starting database backup..." >> /var/log/moodle-backup.log
 /usr/local/bin/moodle-db-backup.sh
-cp ${BACKUP_DIR}/database/moodle_db_*.sql.gz "\$BACKUP_PATH/" 2>/dev/null | head -1
+LATEST_DB_BACKUP=\$(ls -t ${BACKUP_DIR}/database/moodle_db_*.sql.gz 2>/dev/null | head -1 || true)
+if [ -n "\$LATEST_DB_BACKUP" ]; then
+    cp "\$LATEST_DB_BACKUP" "\$BACKUP_PATH/"
+fi
 
 echo "\$(date): Backing up Moodle code..." >> /var/log/moodle-backup.log
 tar -czf "\$BACKUP_PATH/moodle_code.tar.gz" -C /var/www moodle
@@ -725,8 +792,9 @@ else
 fi
 EOF
 
-chmod +x /usr/local/bin/moodle-db-backup.sh
-chmod +x /usr/local/bin/moodle-full-backup.sh
+chmod 700 /usr/local/bin/moodle-db-backup.sh
+chmod 700 /usr/local/bin/moodle-full-backup.sh
+chown root:root /usr/local/bin/moodle-db-backup.sh /usr/local/bin/moodle-full-backup.sh
 
 # Schedule backups with cron
 cat > /etc/cron.d/moodle-backup << 'EOF'
@@ -739,14 +807,15 @@ cat > /etc/cron.d/moodle-backup << 'EOF'
 EOF
 
 touch /var/log/moodle-backup.log
-chown www-data:www-data /var/log/moodle-backup.log
+chown root:root /var/log/moodle-backup.log
+chmod 640 /var/log/moodle-backup.log
 
 log_success "Automated backups configured"
 
 ################################################################################
-# 10. SECURITY LAYER - FAIL2BAN
+# 11. SECURITY LAYER - FAIL2BAN
 ################################################################################
-log_info "Step 10: Installing fail2ban (Layer 3 Security)"
+log_info "Step 11: Installing fail2ban (Layer 3 Security)"
 
 apt install -y fail2ban
 
@@ -803,36 +872,49 @@ systemctl enable fail2ban
 log_success "fail2ban installation complete"
 
 ################################################################################
-# 11. SECURITY LAYER - CROWDSEC
+# 12. SECURITY LAYER - CROWDSEC (FIXED)
 ################################################################################
-log_info "Step 11: Installing CrowdSec (Layer 1 Security)"
+log_info "Step 12: Installing CrowdSec (Layer 1 Security)"
 
+# 1. Clean up old APT warnings once and for all
+rm -f /etc/apt/sources.list.d/mariadb.list.old_*
+
+# 2. Add repo and install engine first
 curl -s https://install.crowdsec.net | sh
+apt-get update
+apt-get install -y crowdsec
 
-apt install -y crowdsec-firewall-bouncer-nftables
+# 3. Pre-register the bouncer to prevent the "dpkg error"
+# This generates a key and saves it to the bouncer config BEFORE installation
+BOUNCER_KEY=$(cscli bouncers add nft-bouncer -o raw)
 
-cscli setup detect
-cscli setup install-hub
+# 4. Install the bouncer
+apt-get install -y crowdsec-firewall-bouncer-nftables
 
-# Install security collections
-cscli collections install crowdsecurity/nginx
-cscli collections install crowdsecurity/linux
-cscli collections install crowdsecurity/sshd
-cscli collections install crowdsecurity/mariadb
-cscli collections install crowdsecurity/http-cve
-cscli collections install crowdsecurity/whitelist-good-actors
+# 5. Inject the key into the config if it didn't auto-populate
+sed -i "s|api_key:.*|api_key: ${BOUNCER_KEY}|" /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
 
-systemctl restart crowdsec
-systemctl enable crowdsec
+
+# 6. Install security collections
+cscli collections install crowdsecurity/nginx \
+                          crowdsecurity/linux \
+                          crowdsecurity/sshd \
+                          crowdsecurity/mariadb \
+                          crowdsecurity/http-cve \
+                          crowdsecurity/whitelist-good-actors
+
+# 7. Final restart and enable
+systemctl daemon-reload
+systemctl enable --now crowdsec
 systemctl restart crowdsec-firewall-bouncer
 systemctl enable crowdsec-firewall-bouncer
 
-log_success "CrowdSec installation complete"
+log_success "CrowdSec installation complete and bouncer registered."
 
 ################################################################################
-# 12. SECURITY LAYER - MODSECURITY
+# 13. SECURITY LAYER - MODSECURITY
 ################################################################################
-log_info "Step 12: Installing ModSecurity 3 (Layer 2 Security)"
+log_info "Step 13: Installing ModSecurity 3 (Layer 2 Security)"
 log_info "This may take 10-15 minutes..."
 
 # Install dependencies
@@ -870,6 +952,9 @@ tar -xzf nginx-${NGINX_VERSION}.tar.gz
 cd /opt/nginx-${NGINX_VERSION}
 ./configure --with-compat --add-dynamic-module=/opt/ModSecurity-nginx
 make modules
+if [[ ! -d /usr/lib/nginx/modules ]]; then
+mkdir -p /usr/lib/nginx/modules
+fi
 cp objs/ngx_http_modsecurity_module.so /usr/share/nginx/modules/
 
 # Download OWASP CRS
@@ -1129,7 +1214,7 @@ if [[ "$USE_SSL" == "true" ]]; then
     log_info "  - Test renewal: certbot renew --dry-run"
 else
     log_warning "SSL is not configured (localhost mode)"
-    log_warning "For production, run with FQDN: sudo ./install-moodle.sh yourdomain.com"
+    log_warning "For production, run with FQDN: sudo ./install-moodle-nginx.sh yourdomain.com"
 fi
 echo
 log_info "Documentation: See CLAUDE.md for detailed configuration and troubleshooting"

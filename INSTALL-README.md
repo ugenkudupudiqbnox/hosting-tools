@@ -45,22 +45,22 @@ This script automates the complete installation of Moodle 5.1.1 with enterprise-
 
 ```bash
 # If you don't have it yet, download from your source
-cd /home/ubuntu/devops/moodle
-chmod +x install-moodle.sh
+cd /root/hosting-tools
+chmod +x moodle/install-moodle-nginx.sh
 ```
 
 ### 2. Run the Installation
 
 **For production with SSL:**
 ```bash
-sudo ./install-moodle.sh learn.example.com
+sudo ./moodle/install-moodle-nginx.sh learn.example.com
 ```
 
 **For local testing (no SSL):**
 ```bash
-sudo ./install-moodle.sh
+sudo ./moodle/install-moodle-nginx.sh
 # or
-sudo ./install-moodle.sh localhost
+sudo ./moodle/install-moodle-nginx.sh localhost
 ```
 
 ### 3. During Installation
@@ -129,7 +129,7 @@ At the end of installation, all credentials are displayed in a formatted box for
 
 ### Syntax
 ```bash
-sudo ./install-moodle.sh [FQDN]
+sudo ./moodle/install-moodle-nginx.sh [FQDN]
 ```
 
 ### Parameters
@@ -141,17 +141,17 @@ sudo ./install-moodle.sh [FQDN]
 
 **Production deployment:**
 ```bash
-sudo ./install-moodle.sh learn.myschool.edu
+sudo ./moodle/install-moodle-nginx.sh learn.myschool.edu
 ```
 
 **Development/testing:**
 ```bash
-sudo ./install-moodle.sh localhost
+sudo ./moodle/install-moodle-nginx.sh localhost
 ```
 
 **Default (localhost):**
 ```bash
-sudo ./install-moodle.sh
+sudo ./moodle/install-moodle-nginx.sh
 ```
 
 ## What Gets Installed
